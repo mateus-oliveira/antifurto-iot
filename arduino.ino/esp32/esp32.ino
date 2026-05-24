@@ -93,7 +93,7 @@ class ServerCallbacks : public BLEServerCallbacks {
 
 class CommandCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *characteristic) override {
-    std::string value = characteristic->getValue();
+    String value = characteristic->getValue();
     size_t length = value.length();
     if (length == 0) {
       return;

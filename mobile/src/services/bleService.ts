@@ -15,9 +15,16 @@ type DeviceListener = (devices: Device[]) => void;
 type StatusListener = (packet: StatusPacket) => void;
 
 class GuardmovelBleService {
-    private manager = new BleManager();
+    private manager: BleManager | null = new BleManager();
     private monitorSubscription: Subscription | null = null;
     private connectedDevice: Device | null = null;
+
+    private ensureManager() {
+        if (this.manager === null)
+            this.manager = new BleManager();
+
+        return this.manager;
+    }
 
     async requestStatus() {
         return this.sendCommand(buildStatusCommand());
@@ -25,8 +32,9 @@ class GuardmovelBleService {
 
     scanForDevices(onDevicesUpdated: DeviceListener, onError: (message: string) => void) {
         const seenDevices = new Map<string, Device>();
+        const manager = this.ensureManager();
 
-        this.manager.startDeviceScan(null, { allowDuplicates: false }, (error: BleError | null, device: Device | null) => {
+        manager.startDeviceScan(null, { allowDuplicates: false }, (error: BleError | null, device: Device | null) => {
             if (error) {
                 onError(error.message);
                 return;
@@ -48,10 +56,11 @@ class GuardmovelBleService {
     }
 
     stopScan() {
-        this.manager.stopDeviceScan();
+        this.manager?.stopDeviceScan();
     }
 
     async connect(device: Device, onStatus: StatusListener) {
+        this.ensureManager();
         this.stopScan();
         this.monitorSubscription?.remove();
 
@@ -93,7 +102,7 @@ class GuardmovelBleService {
         if (this.connectedDevice) {
             const deviceId = this.connectedDevice.id;
             this.connectedDevice = null;
-            await this.manager.cancelDeviceConnection(deviceId);
+            await this.ensureManager().cancelDeviceConnection(deviceId);
         }
     }
 
@@ -115,7 +124,8 @@ class GuardmovelBleService {
 
     destroy() {
         this.monitorSubscription?.remove();
-        this.manager.destroy();
+        this.manager?.destroy();
+        this.manager = null;
     }
 }
 

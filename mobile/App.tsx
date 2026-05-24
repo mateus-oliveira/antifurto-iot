@@ -56,7 +56,8 @@ export default function App() {
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
       }
-      bleService.destroy();
+      bleService.stopScan();
+      void bleService.disconnect();
     };
   }, []);
 
@@ -451,7 +452,6 @@ export default function App() {
           <View style={styles.header}>
             <Text style={styles.eyebrow}>GUARDMOVEL</Text>
             <Text style={styles.title}>Controle do alarme via Bluetooth</Text>
-            <Text style={styles.subtitle}>Expo Dev Client + ESP32 BLE. O app nao funciona no Expo Go.</Text>
           </View>
 
           <View style={styles.statusCard}>

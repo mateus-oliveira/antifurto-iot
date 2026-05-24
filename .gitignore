@@ -1,2 +1,10 @@
-.DS_Store
 .vscode
+node_modules
+dist
+build
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*.DS_Store
