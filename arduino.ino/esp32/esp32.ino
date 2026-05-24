@@ -15,7 +15,7 @@
 #define MPU_ADDR  0x68
 
 /* Password */
-#define PASSWORD "123"
+char currentPassword[16] = "123";
 
 /* Motion Detection */
 // 200 samples × 10 ms = ~2 s of calibration
@@ -29,20 +29,22 @@
 // Milliseconds between motion samples (keeps loop() non-blocking)
 #define MOTION_CHECK_INTERVAL 100
 
-/* States */
+/* Enums */
 enum DeviceState { 
   IDLE,     // waiting for arm command — RLED constant on
   ON_GUARD, // calibrated and monitoring movement — RLED blinks 1s
   ALARM     // suspicious movement detected — RLED blinks fast, buzzer on
 };
-DeviceState deviceState = IDLE;
+enum PendingAction { NONE, ACT_ARM, ACT_RESET, ACT_CHANGE_PWD };
+enum PwdChangeStep { CS_IDLE, CS_CURRENT, CS_NEW, CS_CONFIRM };
 
-/* Password Input */
-// Actions that require a password before executing
-enum PendingAction { NONE, ACT_ARM, ACT_RESET };
+/* Password and State */
+DeviceState deviceState = IDLE;
 PendingAction pendingAction = NONE;
-char passwordBuffer[16];
+PwdChangeStep pwdChangeStep = CS_IDLE;  // sub-step for ACT_CHANGE_PWD
 int passwordIndex = 0;
+char passwordBuffer[16];
+char newPasswordBuffer[16];        // holds candidate new password during change flow
 bool waitingPassword = false;
 
 /* MPU6050 Baseline */
@@ -58,7 +60,7 @@ int triggerCount = 0;
 
 /* Setup */
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   pinMode(RLED_PIN, OUTPUT);
   pinMode(YLED_PIN, OUTPUT);
@@ -80,7 +82,7 @@ void setup() {
 /* Loop */
 void loop() {
   if (Serial.available() > 0) {
-    char c = (char)Serial.read();
+    char c = (char) Serial.read();
 
     if (waitingPassword) {
       handlePasswordInput(c);
@@ -98,7 +100,15 @@ void loop() {
           enterPasswordMode(ACT_RESET);
           break;
 
-        case '?':
+        case 'p': case 'P':
+          if (deviceState == IDLE) {
+            enterPasswordMode(ACT_CHANGE_PWD);
+          } else {
+            Serial.println("[CMD] 'p' disponível apenas no estado IDLE");
+          }
+          break;
+
+        case 'h': case 'H':
           printHelp();
           break;
       }
@@ -150,8 +160,12 @@ void enterPasswordMode(PendingAction action) {
   memset(passwordBuffer, 0, sizeof(passwordBuffer));
   digitalWrite(RLED_PIN, LOW);
   digitalWrite(YLED_PIN, HIGH);
-  Serial.println("[SENHA] Digite a senha e pressione Enter:");
-  Serial.println("        (certifique-se de usar 'Newline' no Serial Monitor)");
+  if (action == ACT_CHANGE_PWD) {
+    pwdChangeStep = CS_CURRENT;
+    Serial.println("[SENHA] Digite a senha atual:");
+  } else {
+    Serial.println("[SENHA] Digite a senha e pressione Enter:");
+  }
 }
 
 // Accumulates characters; processes the password when Enter (\n or \r) is received.
@@ -161,16 +175,19 @@ void handlePasswordInput(char c) {
 
     passwordBuffer[passwordIndex] = '\0';
 
-    if (strcmp(passwordBuffer, PASSWORD) == 0) {
-      onPasswordCorrect();
+    if (pendingAction == ACT_CHANGE_PWD) {
+      handleChangePasswordStep();
     } else {
-      onPasswordWrong();
+      if (strcmp(passwordBuffer, currentPassword) == 0) {
+        onPasswordCorrect();
+      } else {
+        onPasswordWrong();
+      }
+      waitingPassword = false;
+      pendingAction   = NONE;
+      passwordIndex   = 0;
+      memset(passwordBuffer, 0, sizeof(passwordBuffer));
     }
-
-    waitingPassword = false;
-    pendingAction   = NONE;
-    passwordIndex   = 0;
-    memset(passwordBuffer, 0, sizeof(passwordBuffer));
 
   } else {
     // Append character (leave room for null terminator)
@@ -206,6 +223,78 @@ void onPasswordCorrect() {
 
     default:
       break;
+  }
+}
+
+// ─── Change Password Flow ────────────────────────────────────────────────────
+// Called on each Enter press while pendingAction == ACT_CHANGE_PWD.
+// pwdChangeStep 1 = current password, 2 = new password, 3 = confirm new password.
+void handleChangePasswordStep() {
+  switch (pwdChangeStep) {
+    case CS_CURRENT:  // verify current password
+      if (strcmp(passwordBuffer, currentPassword) == 0) {
+        Serial.println("[SENHA] Correta. Digite a nova senha:");
+        pwdChangeStep = CS_NEW;
+        passwordIndex = 0;
+        memset(passwordBuffer, 0, sizeof(passwordBuffer));
+      } else {
+        Serial.println("[SENHA] Incorreta — troca cancelada.");
+        onPasswordWrong();
+        pwdChangeStep   = CS_IDLE;
+        waitingPassword = false;
+        pendingAction   = NONE;
+        passwordIndex   = 0;
+        memset(passwordBuffer,    0, sizeof(passwordBuffer));
+        memset(newPasswordBuffer, 0, sizeof(newPasswordBuffer));
+        setState(IDLE);
+      }
+      break;
+
+    case CS_NEW:
+      memcpy(newPasswordBuffer, passwordBuffer, sizeof(newPasswordBuffer));
+      Serial.println("[SENHA] Confirme a nova senha:");
+      pwdChangeStep = CS_CONFIRM;
+      passwordIndex = 0;
+      memset(passwordBuffer, 0, sizeof(passwordBuffer));
+      break;
+
+    case CS_CONFIRM:
+      if (strcmp(passwordBuffer, newPasswordBuffer) == 0) {
+        memcpy(currentPassword, newPasswordBuffer, sizeof(currentPassword));
+        pwdChangeStep   = CS_IDLE;
+        waitingPassword = false;
+        pendingAction   = NONE;
+        passwordIndex   = 0;
+        memset(passwordBuffer,    0, sizeof(passwordBuffer));
+        memset(newPasswordBuffer, 0, sizeof(newPasswordBuffer));
+        onPasswordChangeSuccess();
+        setState(IDLE);
+      } else {
+        Serial.println("[SENHA] Senhas não coincidem — troca cancelada.");
+        onPasswordWrong();
+        pwdChangeStep   = CS_IDLE;
+        waitingPassword = false;
+        pendingAction   = NONE;
+        passwordIndex   = 0;
+        memset(passwordBuffer,    0, sizeof(passwordBuffer));
+        memset(newPasswordBuffer, 0, sizeof(newPasswordBuffer));
+        setState(IDLE);
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
+void onPasswordChangeSuccess() {
+  Serial.println("[SENHA] Senha alterada com sucesso!");
+  // YLED blinks 3× fast — distinct positive feedback
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(YLED_PIN, HIGH);
+    delay(100);
+    digitalWrite(YLED_PIN, LOW);
+    delay(100);
   }
 }
 
@@ -281,10 +370,11 @@ void updateRLED() {
       break;
 
     case ALARM:
-      // RLED rapid blink: 100 ms period
+      // RLED and YLED rapid blink: 100 ms period
       if (now - lastLedToggle >= 100) {
         rLedState = !rLedState;
         digitalWrite(RLED_PIN, rLedState);
+        digitalWrite(YLED_PIN, !rLedState);
         lastLedToggle = now;
       }
       break;
@@ -322,9 +412,10 @@ void readMPU(int16_t &ax, int16_t &ay, int16_t &az) {
 void printHelp() {
   Serial.println("==============================");
   Serial.println("Comandos (Serial Monitor):");
-  Serial.println("  a / A  ->  Armar      (IDLE -> ON_GUARD, requer senha)");
-  Serial.println("  r / R  ->  Resetar    (AnyState -> IDLE,    requer senha)");
-  Serial.println("  ?      ->  Esta ajuda");
+  Serial.println("  a / A  ->  Armar         (IDLE -> ON_GUARD, requer senha)");
+  Serial.println("  r / R  ->  Resetar       (AnyState -> IDLE,    requer senha)");
+  Serial.println("  p / P  ->  Alterar senha (apenas no estado IDLE)");
+  Serial.println("  h / H  ->  Esta ajuda");
   Serial.println("  Senha padrão: 123");
   Serial.println("==============================");
 }
