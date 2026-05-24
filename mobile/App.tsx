@@ -17,6 +17,7 @@ import {
   buildChangePasswordCommand,
   buildResetCommand,
 } from './src/constants/ble';
+import { LAST_DEVICE_ID_KEY, LAST_DEVICE_NAME_KEY } from './src/constants/storage';
 import { AppHeader } from './src/components/AppHeader';
 import { ControlScreen } from './src/components/ControlScreen';
 import { DeviceStatusCard } from './src/components/DeviceStatusCard';
@@ -25,16 +26,12 @@ import { SearchScreen } from './src/components/SearchScreen';
 import { SecurityScreen } from './src/components/SecurityScreen';
 import { bleService } from './src/services/bleService';
 import { appStyles } from './src/styles/appStyles';
-
-type Screen = 'buscar' | 'controle' | 'seguranca';
-
-const LAST_DEVICE_ID_KEY = 'guardmovel:last-device-id';
-const LAST_DEVICE_NAME_KEY = 'guardmovel:last-device-name';
+import { NavigationTabsEnum, type Screen } from './src/types/navigation';
 
 export default function App() {
   const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [activeScreen, setActiveScreen] = useState<Screen>('buscar');
+  const [activeScreen, setActiveScreen] = useState<Screen>(NavigationTabsEnum.SEARCH);
   const [devices, setDevices] = useState<Device[]>([]);
   const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
   const [savedDeviceId, setSavedDeviceId] = useState<string | null>(null);
@@ -203,7 +200,7 @@ export default function App() {
       ]);
       setStatusType('CONNECTED');
       setStatusMessage('Conexao BLE estabelecida com sucesso');
-      setActiveScreen('controle');
+      setActiveScreen(NavigationTabsEnum.CONTROL);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha ao conectar ao dispositivo.';
       setStatusType('ERROR');
@@ -233,12 +230,12 @@ export default function App() {
 
   async function handleArm() {
     if (!connectedDevice) {
-      Alert.alert('Sem conexao', 'Conecte-se ao ESP32 antes de armar o alarme.');
+      Alert.alert('Sem conexão', 'Conecte-se ao ESP32 antes de armar o alarme.');
       return;
     }
 
     if (!controlPassword.trim()) {
-      Alert.alert('Senha obrigatoria', 'Informe a senha para ativar o alarme.');
+      Alert.alert('Senha obrigatória', 'Informe a senha para ativar o alarme.');
       return;
     }
 
@@ -246,9 +243,9 @@ export default function App() {
       setIsBusy(true);
       await bleService.sendCommand(buildArmCommand(controlPassword));
       setStatusType('ARM');
-      setStatusMessage('Comando de ativacao enviado. Aguarde a calibracao.');
+      setStatusMessage('Comando de ativação enviado. Aguarde a calibração.');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Nao foi possivel ativar o alarme.';
+      const message = error instanceof Error ? error.message : 'Não foi possível ativar o alarme.';
       Alert.alert('Erro ao ativar', message);
     } finally {
       setIsBusy(false);
@@ -257,12 +254,12 @@ export default function App() {
 
   async function handleReset() {
     if (!connectedDevice) {
-      Alert.alert('Sem conexao', 'Conecte-se ao ESP32 antes de resetar o alarme.');
+      Alert.alert('Sem conexão', 'Conecte-se ao ESP32 antes de resetar o alarme.');
       return;
     }
 
     if (!controlPassword.trim()) {
-      Alert.alert('Senha obrigatoria', 'Informe a senha para resetar o alarme.');
+      Alert.alert('Senha obrigatória', 'Informe a senha para resetar o alarme.');
       return;
     }
 
@@ -272,7 +269,7 @@ export default function App() {
       setStatusType('RESET');
       setStatusMessage('Comando de reset enviado.');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Nao foi possivel resetar o alarme.';
+      const message = error instanceof Error ? error.message : 'Não foi possível resetar o alarme.';
       Alert.alert('Erro ao resetar', message);
     } finally {
       setIsBusy(false);
@@ -281,17 +278,17 @@ export default function App() {
 
   async function handleChangePassword() {
     if (!connectedDevice) {
-      Alert.alert('Sem conexao', 'Conecte-se ao ESP32 antes de trocar a senha.');
+      Alert.alert('Sem conexão', 'Conecte-se ao ESP32 antes de trocar a senha.');
       return;
     }
 
     if (!currentPassword.trim() || !nextPassword.trim() || !confirmPassword.trim()) {
-      Alert.alert('Campos obrigatorios', 'Preencha senha atual, nova senha e confirmacao.');
+      Alert.alert('Campos obrigatórios', 'Preencha senha atual, nova senha e confirmação.');
       return;
     }
 
     if (nextPassword.trim() !== confirmPassword.trim()) {
-      Alert.alert('Confirmacao invalida', 'A confirmacao precisa ser igual a nova senha.');
+      Alert.alert('Confirmação inválida', 'A confirmação precisa ser igual à nova senha.');
       return;
     }
 
@@ -299,12 +296,12 @@ export default function App() {
       setIsBusy(true);
       await bleService.sendCommand(buildChangePasswordCommand(currentPassword, nextPassword, confirmPassword));
       setStatusType('PASSWORD');
-      setStatusMessage('Solicitacao de troca de senha enviada.');
+      setStatusMessage('Solicitação de troca de senha enviada.');
       setCurrentPassword('');
       setNextPassword('');
       setConfirmPassword('');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Nao foi possivel trocar a senha.';
+      const message = error instanceof Error ? error.message : 'Não foi possível trocar a senha.';
       Alert.alert('Erro ao trocar senha', message);
     } finally {
       setIsBusy(false);
@@ -326,7 +323,7 @@ export default function App() {
 
         <NavigationTabs activeScreen={activeScreen} onChangeScreen={setActiveScreen} />
 
-        {activeScreen === 'buscar' ? (
+        {activeScreen === NavigationTabsEnum.SEARCH ? (
           <SearchScreen
             devices={devices}
             isBusy={isBusy}
@@ -339,7 +336,7 @@ export default function App() {
           />
         ) : null}
 
-        {activeScreen === 'controle' ? (
+        {activeScreen === NavigationTabsEnum.CONTROL ? (
           <ControlScreen
             connectionLabel={connectionLabel}
             controlPassword={controlPassword}
@@ -353,7 +350,7 @@ export default function App() {
           />
         ) : null}
 
-        {activeScreen === 'seguranca' ? (
+        {activeScreen === NavigationTabsEnum.SECURITY ? (
           <SecurityScreen
             currentPassword={currentPassword}
             nextPassword={nextPassword}
