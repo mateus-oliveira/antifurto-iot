@@ -1,17 +1,11 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   PermissionsAndroid,
   Platform,
-  SafeAreaView,
   ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Device } from 'react-native-ble-plx';
@@ -23,7 +17,14 @@ import {
   buildChangePasswordCommand,
   buildResetCommand,
 } from './src/constants/ble';
+import { AppHeader } from './src/components/AppHeader';
+import { ControlScreen } from './src/components/ControlScreen';
+import { DeviceStatusCard } from './src/components/DeviceStatusCard';
+import { NavigationTabs } from './src/components/NavigationTabs';
+import { SearchScreen } from './src/components/SearchScreen';
+import { SecurityScreen } from './src/components/SecurityScreen';
 import { bleService } from './src/services/bleService';
+import { appStyles } from './src/styles/appStyles';
 
 type Screen = 'buscar' | 'controle' | 'seguranca';
 
@@ -62,19 +63,6 @@ export default function App() {
   }, []);
 
   const connectionLabel = connectedDevice ? `Conectado a ${connectedDevice.name ?? connectedDevice.localName ?? connectedDevice.id}` : 'Desconectado';
-  const statusTone = useMemo(() => {
-    switch (deviceState) {
-      case 'IDLE':
-        return styles.stateIdle;
-      case 'ON_GUARD':
-        return styles.stateGuard;
-      case 'ALARM':
-        return styles.stateAlarm;
-      default:
-        return styles.stateUnknown;
-    }
-  }, [deviceState]);
-
   async function loadSavedDeviceInfo() {
     const id = await AsyncStorage.getItem(LAST_DEVICE_ID_KEY);
     const name = await AsyncStorage.getItem(LAST_DEVICE_NAME_KEY);
@@ -323,392 +311,61 @@ export default function App() {
     }
   }
 
-  function renderSearchScreen() {
-    return (
-      <View style={styles.sectionStack}>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Buscar dispositivos</Text>
-          <Text style={styles.cardCopy}>
-            O app encontra o ESP32 por Bluetooth Low Energy e conecta usando o servico do Guardmovel.
-          </Text>
-          {savedDeviceName ? <Text style={styles.metaText}>Ultimo dispositivo: {savedDeviceName}</Text> : null}
-          <TouchableOpacity disabled={isBusy || isScanning} style={styles.primaryButton} onPress={() => void handleScan()}>
-            <Text style={styles.primaryButtonText}>{isScanning ? 'Buscando...' : 'Buscar dispositivos'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            disabled={isBusy || isScanning || !savedDeviceId}
-            style={styles.secondaryButton}
-            onPress={() => void handleReconnectSavedDevice()}
-          >
-            <Text style={styles.secondaryButtonText}>Reconectar ao ultimo dispositivo</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Dispositivos disponiveis</Text>
-          {devices.length === 0 ? <Text style={styles.cardCopy}>Nenhum Guardmovel encontrado ainda.</Text> : null}
-          {devices.map((device) => {
-            const label = device.name ?? device.localName ?? 'Dispositivo sem nome';
-            return (
-              <TouchableOpacity
-                key={device.id}
-                disabled={isBusy}
-                style={[styles.deviceRow, device.id === savedDeviceId && styles.deviceRowSaved]}
-                onPress={() => void handleConnect(device)}
-              >
-                <View>
-                  <Text style={styles.deviceName}>{label}</Text>
-                  <Text style={styles.deviceMeta}>
-                    {device.id}
-                    {device.id === savedDeviceId ? '  •  salvo' : ''}
-                  </Text>
-                </View>
-                <Text style={styles.deviceSignal}>{device.rssi ?? '--'} dBm</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
-    );
-  }
-
-  function renderControlScreen() {
-    return (
-      <View style={styles.sectionStack}>
-        <View style={[styles.card, styles.heroCard]}>
-          <Text style={styles.cardTitle}>Controle do alarme</Text>
-          <Text style={styles.heroState}>{deviceState}</Text>
-          <Text style={styles.cardCopy}>Use a mesma senha do dispositivo para ativar ou resetar o alarme remotamente.</Text>
-          <TextInput
-            value={controlPassword}
-            onChangeText={setControlPassword}
-            placeholder="Senha do dispositivo"
-            placeholderTextColor="#8c97aa"
-            secureTextEntry
-            style={styles.input}
-          />
-          <TouchableOpacity disabled={isBusy} style={styles.alertButton} onPress={() => void handleArm()}>
-            <Text style={styles.alertButtonText}>Ativar alarme</Text>
-          </TouchableOpacity>
-          <TouchableOpacity disabled={isBusy} style={styles.secondaryButton} onPress={() => void handleReset()}>
-            <Text style={styles.secondaryButtonText}>Desativar / resetar</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Conexao</Text>
-          <Text style={styles.cardCopy}>{connectionLabel}</Text>
-          <TouchableOpacity disabled={!connectedDevice || isBusy} style={styles.ghostButton} onPress={() => void handleDisconnect()}>
-            <Text style={styles.ghostButtonText}>Desconectar</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  function renderSecurityScreen() {
-    return (
-      <View style={styles.sectionStack}>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Trocar senha</Text>
-          <Text style={styles.cardCopy}>A nova senha sera persistida no ESP32 mesmo apos reinicio.</Text>
-          <TextInput
-            value={currentPassword}
-            onChangeText={setCurrentPassword}
-            placeholder="Senha atual"
-            placeholderTextColor="#8c97aa"
-            secureTextEntry
-            style={styles.input}
-          />
-          <TextInput
-            value={nextPassword}
-            onChangeText={setNextPassword}
-            placeholder="Nova senha"
-            placeholderTextColor="#8c97aa"
-            secureTextEntry
-            style={styles.input}
-          />
-          <TextInput
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            placeholder="Confirmar nova senha"
-            placeholderTextColor="#8c97aa"
-            secureTextEntry
-            style={styles.input}
-          />
-          <TouchableOpacity disabled={isBusy} style={styles.primaryButton} onPress={() => void handleChangePassword()}>
-            <Text style={styles.primaryButtonText}>Salvar nova senha</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
   return (
-    <LinearGradient colors={["#08111f", "#12233a", "#223858"]} style={styles.background}>
-      <SafeAreaView style={styles.safeArea}>
-        <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.header}>
-            <Text style={styles.eyebrow}>GUARDMOVEL</Text>
-            <Text style={styles.title}>Controle do alarme via Bluetooth</Text>
-          </View>
+    <LinearGradient colors={["#08111f", "#12233a", "#223858"]} style={appStyles.background}>
+      <StatusBar style="light" />
+      <ScrollView contentContainerStyle={appStyles.scrollContent}>
+        <AppHeader />
 
-          <View style={styles.statusCard}>
-            <View style={styles.statusHeader}>
-              <Text style={styles.statusLabel}>Estado atual</Text>
-              <View style={[styles.stateBadge, statusTone]}>
-                <Text style={styles.stateBadgeText}>{deviceState}</Text>
-              </View>
-            </View>
-            <Text style={styles.statusType}>{statusType}</Text>
-            <Text style={styles.statusMessage}>{statusMessage}</Text>
-            <Text style={styles.metaText}>Ultima atualizacao: {lastUpdateLabel}</Text>
-          </View>
+        <DeviceStatusCard
+          deviceState={deviceState}
+          statusType={statusType}
+          statusMessage={statusMessage}
+          lastUpdateLabel={lastUpdateLabel}
+        />
 
-          <View style={styles.navBar}>
-            <TouchableOpacity style={[styles.navItem, activeScreen === 'buscar' && styles.navItemActive]} onPress={() => setActiveScreen('buscar')}>
-              <Text style={styles.navText}>Buscar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.navItem, activeScreen === 'controle' && styles.navItemActive]} onPress={() => setActiveScreen('controle')}>
-              <Text style={styles.navText}>Controle</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.navItem, activeScreen === 'seguranca' && styles.navItemActive]} onPress={() => setActiveScreen('seguranca')}>
-              <Text style={styles.navText}>Seguranca</Text>
-            </TouchableOpacity>
-          </View>
+        <NavigationTabs activeScreen={activeScreen} onChangeScreen={setActiveScreen} />
 
-          {activeScreen === 'buscar' ? renderSearchScreen() : null}
-          {activeScreen === 'controle' ? renderControlScreen() : null}
-          {activeScreen === 'seguranca' ? renderSecurityScreen() : null}
-        </ScrollView>
-      </SafeAreaView>
+        {activeScreen === 'buscar' ? (
+          <SearchScreen
+            devices={devices}
+            isBusy={isBusy}
+            isScanning={isScanning}
+            savedDeviceId={savedDeviceId}
+            savedDeviceName={savedDeviceName}
+            onConnect={(device) => void handleConnect(device)}
+            onReconnectSavedDevice={() => void handleReconnectSavedDevice()}
+            onScan={() => void handleScan()}
+          />
+        ) : null}
+
+        {activeScreen === 'controle' ? (
+          <ControlScreen
+            connectionLabel={connectionLabel}
+            controlPassword={controlPassword}
+            deviceState={deviceState}
+            isBusy={isBusy}
+            isConnected={connectedDevice !== null}
+            onArm={() => void handleArm()}
+            onDisconnect={() => void handleDisconnect()}
+            onReset={() => void handleReset()}
+            onChangeControlPassword={setControlPassword}
+          />
+        ) : null}
+
+        {activeScreen === 'seguranca' ? (
+          <SecurityScreen
+            currentPassword={currentPassword}
+            nextPassword={nextPassword}
+            confirmPassword={confirmPassword}
+            isBusy={isBusy}
+            onChangeCurrentPassword={setCurrentPassword}
+            onChangeNextPassword={setNextPassword}
+            onChangeConfirmPassword={setConfirmPassword}
+            onSavePassword={() => void handleChangePassword()}
+          />
+        ) : null}
+      </ScrollView>
     </LinearGradient>
   );
 }
-
-const styles = StyleSheet.create({
-  background: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 18,
-    paddingBottom: 32,
-    paddingTop: 12,
-    gap: 16,
-  },
-  header: {
-    gap: 8,
-    paddingTop: 12,
-  },
-  eyebrow: {
-    color: '#7ea4d6',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 2,
-  },
-  title: {
-    color: '#f4f7fb',
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  subtitle: {
-    color: '#b8c5d9',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  statusCard: {
-    backgroundColor: 'rgba(13, 21, 34, 0.78)',
-    borderColor: 'rgba(133, 164, 214, 0.18)',
-    borderRadius: 22,
-    borderWidth: 1,
-    gap: 8,
-    padding: 18,
-  },
-  statusHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  statusLabel: {
-    color: '#9fb0ca',
-    fontSize: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  stateBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  stateIdle: {
-    backgroundColor: '#355784',
-  },
-  stateGuard: {
-    backgroundColor: '#7a651b',
-  },
-  stateAlarm: {
-    backgroundColor: '#8e2e2c',
-  },
-  stateUnknown: {
-    backgroundColor: '#485569',
-  },
-  stateBadgeText: {
-    color: '#f6f9ff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  statusType: {
-    color: '#c2d8ff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  statusMessage: {
-    color: '#edf2fb',
-    fontSize: 18,
-    fontWeight: '600',
-    lineHeight: 24,
-  },
-  metaText: {
-    color: '#8fa2c0',
-    fontSize: 12,
-  },
-  navBar: {
-    backgroundColor: 'rgba(10, 17, 28, 0.74)',
-    borderRadius: 18,
-    flexDirection: 'row',
-    padding: 6,
-  },
-  navItem: {
-    alignItems: 'center',
-    borderRadius: 14,
-    flex: 1,
-    paddingVertical: 12,
-  },
-  navItemActive: {
-    backgroundColor: '#476992',
-  },
-  navText: {
-    color: '#f4f7fb',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  sectionStack: {
-    gap: 14,
-  },
-  card: {
-    backgroundColor: 'rgba(10, 16, 28, 0.82)',
-    borderColor: 'rgba(120, 149, 197, 0.18)',
-    borderRadius: 22,
-    borderWidth: 1,
-    gap: 14,
-    padding: 18,
-  },
-  heroCard: {
-    backgroundColor: 'rgba(24, 22, 28, 0.84)',
-  },
-  cardTitle: {
-    color: '#eef3fb',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  cardCopy: {
-    color: '#b8c6dc',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  heroState: {
-    color: '#ff8f84',
-    fontSize: 34,
-    fontWeight: '800',
-  },
-  input: {
-    backgroundColor: '#0e1728',
-    borderColor: '#334761',
-    borderRadius: 14,
-    borderWidth: 1,
-    color: '#f7fbff',
-    fontSize: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#476992',
-    borderRadius: 14,
-    paddingVertical: 15,
-  },
-  primaryButtonText: {
-    color: '#f5f8fd',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#24364f',
-    borderRadius: 14,
-    paddingVertical: 15,
-  },
-  secondaryButtonText: {
-    color: '#f1f5fc',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  alertButton: {
-    alignItems: 'center',
-    backgroundColor: '#dd4d3f',
-    borderRadius: 18,
-    minHeight: 150,
-    justifyContent: 'center',
-    paddingHorizontal: 18,
-  },
-  alertButtonText: {
-    color: '#fff7f4',
-    fontSize: 22,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  ghostButton: {
-    alignItems: 'center',
-    borderColor: '#59779e',
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingVertical: 14,
-  },
-  ghostButtonText: {
-    color: '#dbe7fb',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  deviceRow: {
-    alignItems: 'center',
-    backgroundColor: '#111c2d',
-    borderRadius: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-  },
-  deviceRowSaved: {
-    borderColor: '#5b80af',
-    borderWidth: 1,
-  },
-  deviceName: {
-    color: '#f3f8ff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  deviceMeta: {
-    color: '#88a0c4',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  deviceSignal: {
-    color: '#b9c9de',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-});
