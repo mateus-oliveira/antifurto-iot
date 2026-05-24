@@ -13,7 +13,7 @@
  *   Arduino D12 → GPIO19   (YLED)
  *   Arduino A4  → GPIO21   (SDA — Wire default on ESP32)
  *   Arduino A5  → GPIO22   (SCL — Wire default on ESP32)
-*/
+ */
 #define RLED_PIN    17
 #define YLED_PIN    19
 #define BUZZER_PIN  26
@@ -276,9 +276,10 @@ void onPasswordCorrect() {
   }
 }
 
-// ─── Change Password Flow ────────────────────────────────────────────────────
-// Called on each Enter press while pendingAction == ACT_CHANGE_PWD.
-// pwdChangeStep 1 = current password, 2 = new password, 3 = confirm new password.
+/* Change Password Flow
+ * Called on each Enter press while pendingAction == ACT_CHANGE_PWD.
+ * pwdChangeStep 1 = current password, 2 = new password, 3 = confirm new password.
+ */
 void handleChangePasswordStep() {
   switch (pwdChangeStep) {
     case CS_CURRENT:  // verify current password
