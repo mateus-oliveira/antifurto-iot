@@ -1,17 +1,17 @@
 #include <Wire.h>
 #include <string.h>
 
-// ─── Pin Definitions ──────────────────────────────────────────────────────────
+/* Pin Definitions */
 // Arduino Uno/Nano: I2C on A4 (SDA) and A5 (SCL)
-#define RLED_PIN     4   // Red LED
-#define YLED_PIN    12   // Yellow LED
+#define RLED_PIN     4
+#define YLED_PIN    12
 #define BUZZER_PIN   2
 #define MPU_ADDR  0x68
 
-// ─── Password ─────────────────────────────────────────────────────────────────
+/* Password */
 #define PASSWORD "123"
 
-// ─── Motion Detection ─────────────────────────────────────────────────────────
+/* Motion Detection */
 // 200 samples × 10 ms = ~2 s of calibration
 #define CALIBRATION_SAMPLES   200
 // Tune this value to adjust sensitivity.
@@ -23,14 +23,15 @@
 // Milliseconds between motion samples (keeps loop() non-blocking)
 #define MOTION_CHECK_INTERVAL 100
 
-// ─── States ───────────────────────────────────────────────────────────────────
-//  IDLE     : waiting for arm command — RLED constant on
-//  ON_GUARD : calibrated and monitoring movement — RLED blinks 1 s
-//  ALARM    : suspicious movement detected — RLED blinks fast, buzzer on
-enum DeviceState { IDLE, ON_GUARD, ALARM };
+/* States */
+enum DeviceState { 
+  IDLE,     // waiting for arm command — RLED constant on
+  ON_GUARD, // calibrated and monitoring movement — RLED blinks 1s
+  ALARM     // suspicious movement detected — RLED blinks fast, buzzer on
+};
 DeviceState deviceState = IDLE;
 
-// ─── Password Input ───────────────────────────────────────────────────────────
+/* Password Input */
 // Actions that require a password before executing
 enum PendingAction { NONE, ACT_ARM, ACT_RESET };
 PendingAction pendingAction = NONE;
@@ -38,18 +39,18 @@ char passwordBuffer[16];
 int passwordIndex = 0;
 bool waitingPassword = false;
 
-// ─── MPU6050 Baseline ─────────────────────────────────────────────────────────
+/* MPU6050 Baseline */
 long baseX = 0, baseY = 0, baseZ = 0;
 
-// ─── Non-blocking Timing ──────────────────────────────────────────────────────
+/* Non-blocking Timing */
 unsigned long lastLedToggle   = 0;
 unsigned long lastMotionCheck = 0;
 bool rLedState = false;
 
-// ─── Consecutive-trigger Counter ──────────────────────────────────────────────
+/* Consecutive-trigger Counter */
 int triggerCount = 0;
 
-// ─── Setup ────────────────────────────────────────────────────────────────────
+/* Setup */
 void setup() {
   Serial.begin(9600);
 
@@ -70,7 +71,7 @@ void setup() {
   printHelp();
 }
 
-// ─── Loop ─────────────────────────────────────────────────────────────────────
+/* Loop */
 void loop() {
   if (Serial.available() > 0) {
     char c = (char)Serial.read();
@@ -135,7 +136,7 @@ void loop() {
   }
 }
 
-// ─── Password Mode ────────────────────────────────────────────────────────────
+/* Password Mode */
 void enterPasswordMode(PendingAction action) {
   pendingAction    = action;
   waitingPassword  = true;
@@ -218,7 +219,7 @@ void onPasswordWrong() {
   }
 }
 
-// ─── State Machine ────────────────────────────────────────────────────────────
+/* State Machine */
 void setState(DeviceState newState) {
   deviceState  = newState;
   triggerCount = 0;
@@ -250,7 +251,7 @@ void setState(DeviceState newState) {
   }
 }
 
-// ─── LED Patterns (non-blocking) ──────────────────────────────────────────────
+/* LED Patterns (non-blocking) */
 void updateRLED() {
   unsigned long now = millis();
 
@@ -284,7 +285,7 @@ void updateRLED() {
   }
 }
 
-// ─── Calibration ──────────────────────────────────────────────────────────────
+/* Calibration */
 void calibrateMPU() {
   long sumX = 0, sumY = 0, sumZ = 0;
   for (int i = 0; i < CALIBRATION_SAMPLES; i++) {
@@ -300,7 +301,7 @@ void calibrateMPU() {
   baseZ = sumZ / CALIBRATION_SAMPLES;
 }
 
-// ─── MPU6050 Read ─────────────────────────────────────────────────────────────
+/* MPU6050 Read */
 void readMPU(int16_t &ax, int16_t &ay, int16_t &az) {
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(0x3B);
@@ -311,7 +312,7 @@ void readMPU(int16_t &ax, int16_t &ay, int16_t &az) {
   az = Wire.read() << 8 | Wire.read();
 }
 
-// ─── Serial Help ──────────────────────────────────────────────────────────────
+/* Serial Help */
 void printHelp() {
   Serial.println("==============================");
   Serial.println("Comandos (Serial Monitor):");
