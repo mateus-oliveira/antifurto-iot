@@ -1,0 +1,10 @@
+export const SEARCH_SCREEN_COPY = 'O app encontra o ESP32 por Bluetooth Low Energy e conecta usando o servico do Guardmovel.';
+export const SEARCH_SCREEN_TITLE = 'Buscar dispositivos';
+export const SAVED_DEVICE_PREFIX = 'Ultimo dispositivo:';
+export const SEARCH_BUTTON_IDLE = 'Buscar dispositivos';
+export const SEARCH_BUTTON_BUSY = 'Buscando...';
+export const RECONNECT_BUTTON_LABEL = 'Reconectar ao ultimo dispositivo';
+export const AVAILABLE_DEVICES_TITLE = 'Dispositivos disponiveis';
+export const EMPTY_DEVICES_MESSAGE = 'Nenhum Guardmovel encontrado ainda.';
+export const UNNAMED_DEVICE_LABEL = 'Dispositivo sem nome';
+export const SAVED_DEVICE_BADGE = '  •  salvo';
