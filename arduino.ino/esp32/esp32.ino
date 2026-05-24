@@ -1,4 +1,9 @@
 #include <Wire.h>
+#include <Preferences.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 #include <string.h>
 
 /* Pin Definitions
@@ -13,6 +18,16 @@
 #define YLED_PIN    19
 #define BUZZER_PIN  26
 #define MPU_ADDR  0x68
+
+/* BLE */
+#define BLE_DEVICE_NAME        "Guardmovel ESP32"
+#define BLE_SERVICE_UUID       "6d9f07f4-58f5-4f6f-b6a6-9d6f4f8d1000"
+#define BLE_COMMAND_CHAR_UUID  "6d9f07f4-58f5-4f6f-b6a6-9d6f4f8d1001"
+#define BLE_STATUS_CHAR_UUID   "6d9f07f4-58f5-4f6f-b6a6-9d6f4f8d1002"
+
+/* Persistence */
+#define PREFS_NAMESPACE        "guardmovel"
+#define PREFS_PASSWORD_KEY     "password"
 
 /* Password */
 char currentPassword[16] = "123";
@@ -47,6 +62,13 @@ char passwordBuffer[16];
 char newPasswordBuffer[16];        // holds candidate new password during change flow
 bool waitingPassword = false;
 
+/* BLE and Persistence */
+Preferences preferences;
+BLECharacteristic *statusCharacteristic = nullptr;
+bool bleClientConnected = false;
+volatile bool bleCommandPending = false;
+char bleCommandBuffer[96];
+
 /* MPU6050 Baseline */
 long baseX = 0, baseY = 0, baseZ = 0;
 
@@ -57,6 +79,35 @@ bool rLedState = false;
 
 /* Consecutive-trigger Counter */
 int triggerCount = 0;
+
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer *server) override {
+    bleClientConnected = true;
+  }
+
+  void onDisconnect(BLEServer *server) override {
+    bleClientConnected = false;
+    server->getAdvertising()->start();
+  }
+};
+
+class CommandCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *characteristic) override {
+    std::string value = characteristic->getValue();
+    size_t length = value.length();
+    if (length == 0) {
+      return;
+    }
+
+    if (length >= sizeof(bleCommandBuffer)) {
+      length = sizeof(bleCommandBuffer) - 1;
+    }
+
+    memcpy(bleCommandBuffer, value.c_str(), length);
+    bleCommandBuffer[length] = '\0';
+    bleCommandPending = true;
+  }
+};
 
 /* Setup */
 void setup() {
@@ -75,8 +126,12 @@ void setup() {
   Wire.write(0);
   Wire.endTransmission(true);
 
+  loadPassword();
+  setupBLE();
+
   setState(IDLE);
   printHelp();
+  sendStatus("READY", "Dispositivo pronto para conexao BLE");
 }
 
 /* Loop */
@@ -113,6 +168,10 @@ void loop() {
           break;
       }
     }
+  }
+
+  if (bleCommandPending) {
+    processBluetoothCommand();
   }
 
   updateRLED();
@@ -205,20 +264,11 @@ void onPasswordCorrect() {
 
   switch (pendingAction) {
     case ACT_ARM:
-      Serial.println("[MPU] Calibrando — mantenha o dispositivo parado...");
-      // YLED stays on during calibration to signal the user to keep still
-      calibrateMPU();
-      Serial.print("[MPU] Baseline — X: ");
-      Serial.print(baseX);
-      Serial.print("  Y: ");
-      Serial.print(baseY);
-      Serial.print("  Z: ");
-      Serial.println(baseZ);
-      setState(ON_GUARD);   // YLED turned off inside setState
+      armSystem();
       break;
 
     case ACT_RESET:
-      setState(IDLE);
+      resetSystem();
       break;
 
     default:
@@ -260,15 +310,19 @@ void handleChangePasswordStep() {
 
     case CS_CONFIRM:
       if (strcmp(passwordBuffer, newPasswordBuffer) == 0) {
-        memcpy(currentPassword, newPasswordBuffer, sizeof(currentPassword));
         pwdChangeStep   = CS_IDLE;
         waitingPassword = false;
         pendingAction   = NONE;
         passwordIndex   = 0;
         memset(passwordBuffer,    0, sizeof(passwordBuffer));
         memset(newPasswordBuffer, 0, sizeof(newPasswordBuffer));
-        onPasswordChangeSuccess();
-        setState(IDLE);
+        if (changePassword(currentPassword, newPasswordBuffer, newPasswordBuffer)) {
+          onPasswordChangeSuccess();
+          setState(IDLE);
+        } else {
+          onPasswordWrong();
+          setState(IDLE);
+        }
       } else {
         Serial.println("[SENHA] Senhas não coincidem — troca cancelada.");
         onPasswordWrong();
@@ -327,6 +381,7 @@ void setState(DeviceState newState) {
       digitalWrite(RLED_PIN, HIGH);   // RLED constant on
       digitalWrite(YLED_PIN, LOW);
       Serial.println("[STATE] -> IDLE");
+      sendStateStatus();
       break;
 
     case ON_GUARD:
@@ -334,6 +389,7 @@ void setState(DeviceState newState) {
       digitalWrite(YLED_PIN, LOW);    // YLED off (was on during password/calibration)
       rLedState = false;
       Serial.println("[STATE] -> ON_GUARD — monitorando movimento...");
+      sendStateStatus();
       break;
 
     case ALARM:
@@ -342,6 +398,7 @@ void setState(DeviceState newState) {
       rLedState = false;
       Serial.println("[STATE] -> ALARME — movimento suspeito detectado!");
       Serial.println("           Use 'r' para resetar (requer senha).");
+      sendStateStatus();
       break;
   }
 }
@@ -417,5 +474,242 @@ void printHelp() {
   Serial.println("  p / P  ->  Alterar senha (apenas no estado IDLE)");
   Serial.println("  h / H  ->  Esta ajuda");
   Serial.println("  Senha padrão: 123");
+  Serial.println("BLE commands:");
+  Serial.println("  ARM|senha");
+  Serial.println("  RESET|senha");
+  Serial.println("  CHANGE_PASSWORD|senhaAtual|novaSenha|confirmacao");
+  Serial.println("  STATUS");
   Serial.println("==============================");
+}
+
+void loadPassword() {
+  preferences.begin(PREFS_NAMESPACE, false);
+  String storedPassword = preferences.getString(PREFS_PASSWORD_KEY, currentPassword);
+  storedPassword.trim();
+
+  if (storedPassword.length() == 0) {
+    strlcpy(currentPassword, "123", sizeof(currentPassword));
+    savePassword();
+    return;
+  }
+
+  storedPassword.toCharArray(currentPassword, sizeof(currentPassword));
+}
+
+void savePassword() {
+  preferences.putString(PREFS_PASSWORD_KEY, currentPassword);
+}
+
+void setupBLE() {
+  BLEDevice::init(BLE_DEVICE_NAME);
+  BLEServer *server = BLEDevice::createServer();
+  server->setCallbacks(new ServerCallbacks());
+
+  BLEService *service = server->createService(BLE_SERVICE_UUID);
+
+  BLECharacteristic *commandCharacteristic = service->createCharacteristic(
+    BLE_COMMAND_CHAR_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
+  );
+  commandCharacteristic->setCallbacks(new CommandCallbacks());
+
+  statusCharacteristic = service->createCharacteristic(
+    BLE_STATUS_CHAR_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+  );
+  statusCharacteristic->addDescriptor(new BLE2902());
+  statusCharacteristic->setValue("READY|Inicializando");
+
+  service->start();
+
+  BLEAdvertising *advertising = BLEDevice::getAdvertising();
+  advertising->addServiceUUID(BLE_SERVICE_UUID);
+  advertising->setScanResponse(true);
+  advertising->setMinPreferred(0x06);
+  advertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+}
+
+void sendStatus(const char *type, const char *message) {
+  if (statusCharacteristic == nullptr) {
+    return;
+  }
+
+  char payload[96];
+  snprintf(payload, sizeof(payload), "%s|%s|%s", type, stateToString(deviceState), message);
+  statusCharacteristic->setValue((uint8_t *)payload, strlen(payload));
+  if (bleClientConnected) {
+    statusCharacteristic->notify();
+  }
+  Serial.print("[BLE] ");
+  Serial.println(payload);
+}
+
+void sendStateStatus() {
+  sendStatus("STATE", "Estado atualizado");
+}
+
+void processBluetoothCommand() {
+  bleCommandPending = false;
+  processProtocolCommand(bleCommandBuffer);
+  memset(bleCommandBuffer, 0, sizeof(bleCommandBuffer));
+}
+
+bool verifyPassword(const char *password) {
+  return password != nullptr && strcmp(password, currentPassword) == 0;
+}
+
+void clearPasswordFlow() {
+  pwdChangeStep = CS_IDLE;
+  waitingPassword = false;
+  pendingAction = NONE;
+  passwordIndex = 0;
+  memset(passwordBuffer, 0, sizeof(passwordBuffer));
+  memset(newPasswordBuffer, 0, sizeof(newPasswordBuffer));
+}
+
+void armSystem() {
+  if (deviceState != IDLE) {
+    sendStatus("ERROR", "Armar permitido apenas em IDLE");
+    return;
+  }
+
+  sendStatus("CALIBRATING", "Calibrando MPU, mantenha o dispositivo parado");
+  Serial.println("[MPU] Calibrando — mantenha o dispositivo parado...");
+  calibrateMPU();
+  Serial.print("[MPU] Baseline — X: ");
+  Serial.print(baseX);
+  Serial.print("  Y: ");
+  Serial.print(baseY);
+  Serial.print("  Z: ");
+  Serial.println(baseZ);
+  setState(ON_GUARD);
+}
+
+void resetSystem() {
+  setState(IDLE);
+}
+
+bool changePassword(const char *current, const char *next, const char *confirm) {
+  if (!verifyPassword(current)) {
+    sendStatus("ERROR", "Senha atual incorreta");
+    return false;
+  }
+
+  if (next == nullptr || confirm == nullptr || strlen(next) == 0) {
+    sendStatus("ERROR", "Nova senha invalida");
+    return false;
+  }
+
+  if (strlen(next) >= sizeof(currentPassword)) {
+    sendStatus("ERROR", "Nova senha excede o limite de 15 caracteres");
+    return false;
+  }
+
+  if (strcmp(next, confirm) != 0) {
+    sendStatus("ERROR", "Confirmacao de senha divergente");
+    return false;
+  }
+
+  strlcpy(currentPassword, next, sizeof(currentPassword));
+  savePassword();
+  sendStatus("PASSWORD_CHANGED", "Senha alterada com sucesso");
+  return true;
+}
+
+void processProtocolCommand(char *commandLine) {
+  if (commandLine == nullptr || commandLine[0] == '\0') {
+    sendStatus("ERROR", "Comando vazio");
+    return;
+  }
+
+  char *cursor = commandLine;
+  char *command = nextToken(cursor);
+  if (command == nullptr) {
+    sendStatus("ERROR", "Comando invalido");
+    return;
+  }
+
+  if (strcasecmp(command, "STATUS") == 0) {
+    sendStateStatus();
+    return;
+  }
+
+  if (strcasecmp(command, "ARM") == 0) {
+    char *password = nextToken(cursor);
+    if (!verifyPassword(password)) {
+      onPasswordWrong();
+      sendStatus("ERROR", "Senha incorreta para armar");
+      return;
+    }
+    armSystem();
+    return;
+  }
+
+  if (strcasecmp(command, "RESET") == 0) {
+    char *password = nextToken(cursor);
+    if (!verifyPassword(password)) {
+      onPasswordWrong();
+      sendStatus("ERROR", "Senha incorreta para resetar");
+      return;
+    }
+    resetSystem();
+    sendStatus("SUCCESS", "Alarme resetado");
+    return;
+  }
+
+  if (strcasecmp(command, "CHANGE_PASSWORD") == 0) {
+    char *current = nextToken(cursor);
+    char *next = nextToken(cursor);
+    char *confirm = nextToken(cursor);
+    if (changePassword(current, next, confirm)) {
+      onPasswordChangeSuccess();
+      setState(IDLE);
+      return;
+    }
+
+    onPasswordWrong();
+    return;
+  }
+
+  sendStatus("ERROR", "Comando desconhecido");
+}
+
+char *nextToken(char *&cursor) {
+  if (cursor == nullptr) {
+    return nullptr;
+  }
+
+  while (*cursor == ' ') {
+    cursor++;
+  }
+
+  if (*cursor == '\0') {
+    return nullptr;
+  }
+
+  char *tokenStart = cursor;
+  while (*cursor != '\0' && *cursor != '|') {
+    cursor++;
+  }
+
+  if (*cursor == '|') {
+    *cursor = '\0';
+    cursor++;
+  }
+
+  return tokenStart;
+}
+
+const char *stateToString(DeviceState state) {
+  switch (state) {
+    case IDLE:
+      return "IDLE";
+    case ON_GUARD:
+      return "ON_GUARD";
+    case ALARM:
+      return "ALARM";
+    default:
+      return "UNKNOWN";
+  }
 }
