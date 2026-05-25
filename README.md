@@ -10,6 +10,7 @@
 - C++
 - React Native
 - Expo
+- Typescript
 
 ## Descrição
 
@@ -50,8 +51,8 @@ Exemplos:
 ## Senha
 
 - Senha inicial: `123`
-- A senha alterada e salva no armazenamento nao volatil do ESP32.
-- Depois de reiniciar a placa, a ultima senha continua valida.
+- A senha alterada e salva no armazenamento não volátil do ESP32.
+- Depois de reiniciar a placa, a última senha continua válida.
 
 ## App mobile
 
@@ -91,12 +92,3 @@ npm run android
 cd mobile
 npm exec tsc --noEmit
 ```
-
-## Fluxo sugerido de teste
-
-1. Grave o firmware do ESP32.
-2. Ligue o dispositivo e confirme que ele anuncia `Guardmovel ESP32` via BLE.
-3. Abra o app Android e toque em `Buscar dispositivos`.
-4. Conecte no ESP32 e consulte o estado atual.
-5. Teste ativacao, disparo do alarme, reset e troca de senha.
-6. Reinicie o ESP32 e confirme que a nova senha continua funcionando.
